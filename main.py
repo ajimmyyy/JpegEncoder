@@ -8,4 +8,8 @@ if __name__ == "__main__":
     img = Image.open(BMP_PATH)
     imgMatrix = np.array(img)
 
-    yuvImg = tools.TransformRgbToYuc(imgMatrix)
+    padImg = tools.Padding(imgMatrix)
+    yuvImg = tools.TransformRgbToYuc(padImg)
+    dctImg = tools.TrandformDCT(yuvImg)
+
+    print(dctImg.shape)
