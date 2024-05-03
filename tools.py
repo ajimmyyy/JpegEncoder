@@ -1,22 +1,6 @@
 import numpy as np
+from huffman import HuffmanTree
 from scipy.fftpack import dct
-
-
-def BlockReduce(image, block_size, func=np.mean):
-    assert len(image.shape) == 2, "Input image must be 2D"
-    assert isinstance(block_size, tuple), "Block size must be a tuple (rows, cols)"
-    assert all(isinstance(size, int) and size > 0 for size in block_size), "Block size must contain positive integers"
-    assert image.shape[0] >= block_size[0] and image.shape[1] >= block_size[1], "Block size must be smaller than image size"
-
-    rows, cols = image.shape[0] // block_size[0], image.shape[1] // block_size[1]
-    result = np.empty((rows, cols), dtype=image.dtype)
-
-    for i in range(rows):
-        for j in range(cols):
-            block = image[i * block_size[0]: (i + 1) * block_size[0], j * block_size[1]: (j + 1) * block_size[1]]
-            result[i, j] = func(block)
-
-    return result
 
 
 def Padding(img: np.ndarray) -> np.ndarray:
@@ -30,7 +14,6 @@ def Padding(img: np.ndarray) -> np.ndarray:
     padImage[:height,:width] = img
 
     return padImage
-
 
 def TransformRgbToYuc(rgbImg: np.ndarray) -> np.ndarray:
     yuvMatrix = np.array([
@@ -46,15 +29,99 @@ def TransformRgbToYuc(rgbImg: np.ndarray) -> np.ndarray:
 
     return yuvImg
 
+def TransformDCT(yuvImg: np.ndarray) -> np.ndarray:
+    return dct(dct(yuvImg.T, norm='ortho').T, norm='ortho')
 
-def TrandformDCT(yuvImg: np.ndarray) -> np.ndarray:
-    grayImg = yuvImg[:, :, 0]
+def Quantize(block: np.ndarray, type: str) -> np.ndarray:
+    if type == "luminance":
+        q = np.array([
+            [16, 11, 10, 16, 24, 40, 51, 61],
+            [12, 12, 14, 19, 26, 58, 60, 55],
+            [14, 13, 16, 24, 40, 57, 69, 56],
+            [14, 17, 22, 29, 51, 87, 80, 62],
+            [18, 22, 37, 56, 68, 109, 103, 77],
+            [24, 35, 55, 64, 81, 104, 113, 92],
+            [49, 64, 78, 87, 103, 121, 120, 101],
+            [72, 92, 95, 98, 112, 100, 103, 99]
+        ])
+    elif type == "chrominance":
+        q = np.array([
+            [17, 18, 24, 47, 99, 99, 99, 99],
+            [18, 21, 26, 66, 99, 99, 99, 99],
+            [24, 26, 56, 99, 99, 99, 99, 99],
+            [47, 66, 99, 99, 99, 99, 99, 99],
+            [99, 99, 99, 99, 99, 99, 99, 99],
+            [99, 99, 99, 99, 99, 99, 99, 99],
+            [99, 99, 99, 99, 99, 99, 99, 99],
+            [99, 99, 99, 99, 99, 99, 99, 99]
+        ])
+    else:
+        raise ValueError("type should be either 'luminance' or 'chrominance'")
 
-    blocks = BlockReduce(grayImg, (8, 8), np.mean)
-    dctBlocks = np.zeros_like(blocks)
+    return (block / q).round().astype(np.int32)
+
+def ZigZag(block: np.ndarray) -> np.ndarray:
+    zigzag = []
+    rows, cols = block.shape
+    row, col = 0, 0
+    direction = 1  # 1 for moving up, -1 for moving down
+
+    for _ in range(rows * cols):
+        zigzag.append(block[row, col])
+        if direction == 1:
+            if col == cols - 1:
+                row += 1
+                direction = -1
+            elif row == 0:
+                col += 1
+                direction = -1
+            else:
+                row -= 1
+                col += 1
+        else:
+            if row == rows - 1:
+                col += 1
+                direction = 1
+            elif col == 0:
+                row += 1
+                direction = 1
+            else:
+                row += 1
+                col -= 1
+
+    return np.array(zigzag)
+
+def CompressionImg(img) -> np.ndarray:
+    imgMatrix = np.array(img)
+    padImg = Padding(imgMatrix)
+    yuvImg = TransformRgbToYuc(padImg)
+
+    rows, cols = yuvImg.shape[:2]
+
+    if rows % 8 == cols % 8 == 0:
+        blocksCount = rows // 8 * cols // 8
+    else:
+        raise ValueError("Image dimensions should be divisible by 8")
     
-    for i in range(blocks.shape[0]):
-        for j in range(blocks.shape[1]):
-            dctBlocks[i, j] = dct(dct(blocks[i, j], norm='ortho'), norm='ortho')
+    dcMatrix = np.zeros((blocksCount, 3), dtype=np.int32)
+    acMatrix = np.zeros((blocksCount, 63, 3), dtype=np.int32)
+    
+    for i in range(0, rows, 8):
+        for j in range(0, cols, 8):
+            try:
+                blockIndex += 1
+            except NameError:
+                blockIndex = 0
 
-    return dctBlocks
+            for k in range(3):
+                block = yuvImg[i:i+8, j:j+8, k]
+                dctMatrix  = TransformDCT(block)
+                quantMatrix = Quantize(dctMatrix, "luminance" if k == 0 else "chrominance")
+                zigzagMatrix = ZigZag(quantMatrix)
+
+                dcMatrix[blockIndex, k] = zigzagMatrix[0]
+                acMatrix[blockIndex, :, k] = zigzagMatrix[1:]
+    
+    huffmanDcMatrix = HuffmanTree(dcMatrix.flatten())
+    huffmanAcMatrix = HuffmanTree(acMatrix.flatten())
+    return dcMatrix, acMatrix            
