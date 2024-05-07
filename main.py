@@ -6,6 +6,4 @@ BMP_PATH = "Img\lena.bmp"
 
 if __name__ == "__main__":
     img = Image.open(BMP_PATH)
-    dctImg = tools.CompressionImg(img)
-
-    print() 
+    dctImg = tools.CompressionImg(img, "Img/lena.jpg")

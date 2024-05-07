@@ -1,61 +1,87 @@
-class TreeNode:
-    def __init__(self, char, freq):
-        self.char = char
-        self.freq = freq
-        self.left = None
-        self.right = None
+from queue import PriorityQueue
+
 
 class HuffmanTree:
-    def __init__(self, text):
-        self.text = text
-        self.freq_map = self.build_freq_map()
-        self.root = self.build_huffman_tree()
-        self.codes = self.generate_huffman_codes()
 
-    def build_freq_map(self):
-        freq_map = {}
-        for char in self.text:
-            freq_map[char] = freq_map.get(char, 0) + 1
-        return freq_map
+    class __Node:
+        def __init__(self, value, freq, left_child, right_child):
+            self.value = value
+            self.freq = freq
+            self.left_child = left_child
+            self.right_child = right_child
 
-    def build_huffman_tree(self):
-        nodes = [TreeNode(char, freq) for char, freq in self.freq_map.items()]
-        while len(nodes) > 1:
-            nodes.sort(key=lambda x: x.freq)
-            left = nodes.pop(0)
-            right = nodes.pop(0)
-            merged = TreeNode(None, left.freq + right.freq)
-            merged.left = left
-            merged.right = right
-            nodes.append(merged)
-        return nodes[0]
+        @classmethod
+        def init_leaf(self, value, freq):
+            return self(value, freq, None, None)
 
-    def generate_huffman_codes(self):
-        codes = {}
-        def traverse(node, code=''):
-            if node:
-                if node.char:
-                    codes[node.char] = code
-                traverse(node.left, code + '0')
-                traverse(node.right, code + '1')
-        traverse(self.root)
-        return codes
+        @classmethod
+        def init_node(self, left_child, right_child):
+            freq = left_child.freq + right_child.freq
+            return self(None, freq, left_child, right_child)
 
-    def encode(self, original_text):
-        encoded_text = ''
-        for char in original_text:
-            encoded_text += self.codes[char]
-        return encoded_text
+        def is_leaf(self):
+            return self.value is not None
 
-    def decode(self, encoded_text):
-        decoded_text = ''
-        current_node = self.root
-        for bit in encoded_text:
-            if bit == '0':
-                current_node = current_node.left
+        def __eq__(self, other):
+            stup = self.value, self.freq, self.left_child, self.right_child
+            otup = other.value, other.freq, other.left_child, other.right_child
+            return stup == otup
+
+        def __nq__(self, other):
+            return not (self == other)
+
+        def __lt__(self, other):
+            return self.freq < other.freq
+
+        def __le__(self, other):
+            return self.freq < other.freq or self.freq == other.freq
+
+        def __gt__(self, other):
+            return not (self <= other)
+
+        def __ge__(self, other):
+            return not (self < other)
+
+    def __init__(self, arr):
+        q = PriorityQueue()
+
+        # calculate frequencies and insert them into a priority queue
+        for val, freq in self.__calc_freq(arr).items():
+            q.put(self.__Node.init_leaf(val, freq))
+
+        while q.qsize() >= 2:
+            u = q.get()
+            v = q.get()
+
+            q.put(self.__Node.init_node(u, v))
+
+        self.__root = q.get()
+
+        # dictionaries to store huffman table
+        self.__value_to_bitstring = dict()
+
+    def value_to_bitstring_table(self):
+        if len(self.__value_to_bitstring.keys()) == 0:
+            self.__create_huffman_table()
+        return self.__value_to_bitstring
+
+    def __create_huffman_table(self):
+        def tree_traverse(current_node, bitstring=''):
+            if current_node is None:
+                return
+            if current_node.is_leaf():
+                self.__value_to_bitstring[current_node.value] = bitstring
+                return
+            tree_traverse(current_node.left_child, bitstring + '0')
+            tree_traverse(current_node.right_child, bitstring + '1')
+
+        tree_traverse(self.__root)
+
+    def __calc_freq(self, arr):
+        freq_dict = dict()
+        for elem in arr:
+            if elem in freq_dict:
+                freq_dict[elem] += 1
             else:
-                current_node = current_node.right
-            if not current_node.left and not current_node.right:
-                decoded_text += current_node.char
-                current_node = self.root
-        return decoded_text
+                freq_dict[elem] = 1
+        return freq_dict

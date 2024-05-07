@@ -1,6 +1,8 @@
+import os
 import numpy as np
-from huffman import HuffmanTree
 from scipy.fftpack import dct
+from utils import *
+from huffman import HuffmanTree
 
 
 def Padding(img: np.ndarray) -> np.ndarray:
@@ -91,7 +93,87 @@ def ZigZag(block: np.ndarray) -> np.ndarray:
 
     return np.array(zigzag)
 
-def CompressionImg(img) -> np.ndarray:
+# reference from https://github.com/ghallak/jpeg-python/tree/master
+def run_length_encode(arr):
+    # determine where the sequence is ending prematurely
+    last_nonzero = -1
+    for i, elem in enumerate(arr):
+        if elem != 0:
+            last_nonzero = i
+
+    # each symbol is a (RUNLENGTH, SIZE) tuple
+    symbols = []
+
+    # values are binary representations of array elements using SIZE bits
+    values = []
+
+    run_length = 0
+
+    for i, elem in enumerate(arr):
+        if i > last_nonzero:
+            symbols.append((0, 0))
+            values.append(int_to_binstr(0))
+            break
+        elif elem == 0 and run_length < 15:
+            run_length += 1
+        else:
+            size = bits_required(elem)
+            symbols.append((run_length, size))
+            values.append(int_to_binstr(elem))
+            run_length = 0
+    return symbols, values
+
+def write_to_file(filepath, dc, ac, blocks_count, tables):
+    try:
+        f = open(filepath, 'w')
+    except FileNotFoundError as e:
+        raise FileNotFoundError(
+                "No such directory: {}".format(
+                    os.path.dirname(filepath))) from e
+
+    for table_name in ['dc_y', 'ac_y', 'dc_c', 'ac_c']:
+
+        # 16 bits for 'table_size'
+        f.write(uint_to_binstr(len(tables[table_name]), 16))
+
+        for key, value in tables[table_name].items():
+            if table_name in {'dc_y', 'dc_c'}:
+                # 4 bits for the 'category'
+                # 4 bits for 'code_length'
+                # 'code_length' bits for 'huffman_code'
+                f.write(uint_to_binstr(key, 4))
+                f.write(uint_to_binstr(len(value), 4))
+                f.write(value)
+            else:
+                # 4 bits for 'run_length'
+                # 4 bits for 'size'
+                # 8 bits for 'code_length'
+                # 'code_length' bits for 'huffman_code'
+                f.write(uint_to_binstr(key[0], 4))
+                f.write(uint_to_binstr(key[1], 4))
+                f.write(uint_to_binstr(len(value), 8))
+                f.write(value)
+
+    # 32 bits for 'blocks_count'
+    f.write(uint_to_binstr(blocks_count, 32))
+
+    for b in range(blocks_count):
+        for c in range(3):
+            category = bits_required(dc[b, c])
+            symbols, values = run_length_encode(ac[b, :, c])
+
+            dc_table = tables['dc_y'] if c == 0 else tables['dc_c']
+            ac_table = tables['ac_y'] if c == 0 else tables['ac_c']
+
+            f.write(dc_table[category])
+            f.write(int_to_binstr(dc[b, c]))
+
+            for i in range(len(symbols)):
+                f.write(ac_table[tuple(symbols[i])])
+                f.write(values[i])
+    f.close()
+
+def CompressionImg(img, addr = ".jpg") -> np.ndarray:
     imgMatrix = np.array(img)
     padImg = Padding(imgMatrix)
     yuvImg = TransformRgbToYuc(padImg)
@@ -121,7 +203,21 @@ def CompressionImg(img) -> np.ndarray:
 
                 dcMatrix[blockIndex, k] = zigzagMatrix[0]
                 acMatrix[blockIndex, :, k] = zigzagMatrix[1:]
-    
-    huffmanDcMatrix = HuffmanTree(dcMatrix.flatten())
-    huffmanAcMatrix = HuffmanTree(acMatrix.flatten())
-    return dcMatrix, acMatrix            
+
+    H_DC_Y = HuffmanTree(np.vectorize(bits_required)(dcMatrix[:, 0]))
+    H_DC_C = HuffmanTree(np.vectorize(bits_required)(dcMatrix[:, 1:].flat))
+    H_AC_Y = HuffmanTree(
+            flatten(run_length_encode(acMatrix[i, :, 0])[0]
+                    for i in range(blocksCount)))
+    H_AC_C = HuffmanTree(
+            flatten(run_length_encode(acMatrix[i, :, j])[0]
+                    for i in range(blocksCount) for j in [1, 2]))
+
+    tables = {'dc_y': H_DC_Y.value_to_bitstring_table(),
+              'ac_y': H_AC_Y.value_to_bitstring_table(),
+              'dc_c': H_DC_C.value_to_bitstring_table(),
+              'ac_c': H_AC_C.value_to_bitstring_table()}
+
+    write_to_file(addr, dcMatrix, acMatrix, blocksCount, tables)
+
+    return            
