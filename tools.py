@@ -4,6 +4,27 @@ from scipy.fftpack import dct
 from utils import *
 from huffman import HuffmanTree
 
+LUMINANCE_QUANTIZATION_TABLE = np.array([
+    [16, 11, 10, 16, 24, 40, 51, 61],
+    [12, 12, 14, 19, 26, 58, 60, 55],
+    [14, 13, 16, 24, 40, 57, 69, 56],
+    [14, 17, 22, 29, 51, 87, 80, 62],
+    [18, 22, 37, 56, 68, 109, 103, 77],
+    [24, 35, 55, 64, 81, 104, 113, 92],
+    [49, 64, 78, 87, 103, 121, 120, 101],
+    [72, 92, 95, 98, 112, 100, 103, 99]
+])
+
+CHROMINANCE_QUANTIZATION_TABLE = np.array([
+    [17, 18, 24, 47, 99, 99, 99, 99],
+    [18, 21, 26, 66, 99, 99, 99, 99],
+    [24, 26, 56, 99, 99, 99, 99, 99],
+    [47, 66, 99, 99, 99, 99, 99, 99],
+    [99, 99, 99, 99, 99, 99, 99, 99],
+    [99, 99, 99, 99, 99, 99, 99, 99],
+    [99, 99, 99, 99, 99, 99, 99, 99],
+    [99, 99, 99, 99, 99, 99, 99, 99]
+])
 
 def Padding(img: np.ndarray) -> np.ndarray:
     height, width = img.shape[:2]
@@ -36,27 +57,9 @@ def TransformDCT(yuvImg: np.ndarray) -> np.ndarray:
 
 def Quantize(block: np.ndarray, type: str) -> np.ndarray:
     if type == "luminance":
-        q = np.array([
-            [16, 11, 10, 16, 24, 40, 51, 61],
-            [12, 12, 14, 19, 26, 58, 60, 55],
-            [14, 13, 16, 24, 40, 57, 69, 56],
-            [14, 17, 22, 29, 51, 87, 80, 62],
-            [18, 22, 37, 56, 68, 109, 103, 77],
-            [24, 35, 55, 64, 81, 104, 113, 92],
-            [49, 64, 78, 87, 103, 121, 120, 101],
-            [72, 92, 95, 98, 112, 100, 103, 99]
-        ])
+        q = LUMINANCE_QUANTIZATION_TABLE
     elif type == "chrominance":
-        q = np.array([
-            [17, 18, 24, 47, 99, 99, 99, 99],
-            [18, 21, 26, 66, 99, 99, 99, 99],
-            [24, 26, 56, 99, 99, 99, 99, 99],
-            [47, 66, 99, 99, 99, 99, 99, 99],
-            [99, 99, 99, 99, 99, 99, 99, 99],
-            [99, 99, 99, 99, 99, 99, 99, 99],
-            [99, 99, 99, 99, 99, 99, 99, 99],
-            [99, 99, 99, 99, 99, 99, 99, 99]
-        ])
+        q = CHROMINANCE_QUANTIZATION_TABLE
     else:
         raise ValueError("type should be either 'luminance' or 'chrominance'")
 
@@ -123,54 +126,37 @@ def run_length_encode(arr):
             run_length = 0
     return symbols, values
 
-def write_to_file(filepath, dc, ac, blocks_count, tables):
+def WriteToFile(filepath, dc, ac, rows, cols, tables):
     try:
-        f = open(filepath, 'w')
+        f = open(filepath, 'wb')
     except FileNotFoundError as e:
         raise FileNotFoundError(
                 "No such directory: {}".format(
                     os.path.dirname(filepath))) from e
 
-    for table_name in ['dc_y', 'ac_y', 'dc_c', 'ac_c']:
+    # write jpeg header
+    f.write(bytes.fromhex('FFD8FFE000104A46494600010100000100010000'))
+    # write y Quantization table
+    f.write(bytes.fromhex('FFDB004300'))
+    f.write(LUMINANCE_QUANTIZATION_TABLE.flatten().tobytes())
+    # write c Quantization table
+    f.write(bytes.fromhex('FFDB004301'))
+    f.write(CHROMINANCE_QUANTIZATION_TABLE.flatten().tobytes())
+    # write hight and width
+    f.write(bytes.fromhex('FFC0001108'))
+    f.write(bytes.fromhex(hex(rows)[2:].rjust(4,'0')))
+    f.write(bytes.fromhex(hex(cols)[2:].rjust(4,'0')))
 
-        # 16 bits for 'table_size'
-        f.write(uint_to_binstr(len(tables[table_name]), 16))
+    # write Huffman table
+    f.write(bytes.fromhex('03011100021101031101'))
+    for name, table in tables.items():
+        f.write(bytes.fromhex('FFC4'))
+        f.write(bytes.fromhex('00'))
 
-        for key, value in tables[table_name].items():
-            if table_name in {'dc_y', 'dc_c'}:
-                # 4 bits for the 'category'
-                # 4 bits for 'code_length'
-                # 'code_length' bits for 'huffman_code'
-                f.write(uint_to_binstr(key, 4))
-                f.write(uint_to_binstr(len(value), 4))
-                f.write(value)
-            else:
-                # 4 bits for 'run_length'
-                # 4 bits for 'size'
-                # 8 bits for 'code_length'
-                # 'code_length' bits for 'huffman_code'
-                f.write(uint_to_binstr(key[0], 4))
-                f.write(uint_to_binstr(key[1], 4))
-                f.write(uint_to_binstr(len(value), 8))
-                f.write(value)
-
-    # 32 bits for 'blocks_count'
-    f.write(uint_to_binstr(blocks_count, 32))
-
-    for b in range(blocks_count):
-        for c in range(3):
-            category = bits_required(dc[b, c])
-            symbols, values = run_length_encode(ac[b, :, c])
-
-            dc_table = tables['dc_y'] if c == 0 else tables['dc_c']
-            ac_table = tables['ac_y'] if c == 0 else tables['ac_c']
-
-            f.write(dc_table[category])
-            f.write(int_to_binstr(dc[b, c]))
-
-            for i in range(len(symbols)):
-                f.write(ac_table[tuple(symbols[i])])
-                f.write(values[i])
+    # write data
+    f.write(bytes.fromhex('FFDA000C03010002110311003F00'))
+    f.write(bytes.fromhex())
+    f.write(bytes.fromhex('FFD9'))
     f.close()
 
 def CompressionImg(img, addr = ".jpg") -> np.ndarray:
@@ -217,7 +203,9 @@ def CompressionImg(img, addr = ".jpg") -> np.ndarray:
               'ac_y': H_AC_Y.value_to_bitstring_table(),
               'dc_c': H_DC_C.value_to_bitstring_table(),
               'ac_c': H_AC_C.value_to_bitstring_table()}
+    
+    print(tables['ac_c'])
 
-    write_to_file(addr, dcMatrix, acMatrix, blocksCount, tables)
+    # WriteToFile(addr, dcMatrix, acMatrix, rows, cols, tables)
 
     return            
