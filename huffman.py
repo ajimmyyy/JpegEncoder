@@ -1,87 +1,75 @@
-from queue import PriorityQueue
+import heapq
+from collections import defaultdict, Counter
+import numpy as np
 
+class Node:
+    def __init__(self, symbol, freq):
+        self.symbol = symbol
+        self.freq = freq
+        self.left = None
+        self.right = None
 
-class HuffmanTree:
+    def __lt__(self, other):
+        return self.freq < other.freq
 
-    class __Node:
-        def __init__(self, value, freq, left_child, right_child):
-            self.value = value
-            self.freq = freq
-            self.left_child = left_child
-            self.right_child = right_child
+def BuildHuffmanTree(freqs):
+    heap = [Node(symbol, freq) for symbol, freq in freqs.items()]
+    heapq.heapify(heap)
 
-        @classmethod
-        def init_leaf(self, value, freq):
-            return self(value, freq, None, None)
+    while len(heap) > 1:
+        node1 = heapq.heappop(heap)
+        node2 = heapq.heappop(heap)
+        merged = Node(None, node1.freq + node2.freq)
+        merged.left = node1
+        merged.right = node2
+        heapq.heappush(heap, merged)
 
-        @classmethod
-        def init_node(self, left_child, right_child):
-            freq = left_child.freq + right_child.freq
-            return self(None, freq, left_child, right_child)
+    return heap[0]
 
-        def is_leaf(self):
-            return self.value is not None
+def GenerateHuffmanCodes(node, prefix="", huff_table={}):
+    if node is not None:
+        if node.symbol is not None:
+            huff_table[node.symbol] = prefix
+        GenerateHuffmanCodes(node.left, prefix + "0", huff_table)
+        GenerateHuffmanCodes(node.right, prefix + "1", huff_table)
+    return huff_table
 
-        def __eq__(self, other):
-            stup = self.value, self.freq, self.left_child, self.right_child
-            otup = other.value, other.freq, other.left_child, other.right_child
-            return stup == otup
+def EncodeValue(value):
+    abs_value = abs(value)
+    category = int(np.floor(np.log2(abs_value))) + 1 if abs_value != 0 else 0
+    bit_string = format(abs_value, f'0{category}b')
 
-        def __nq__(self, other):
-            return not (self == other)
+    if value < 0:
+        bit_string = ''.join('1' if bit == '0' else '0' for bit in bit_string)
+    return category, bit_string
 
-        def __lt__(self, other):
-            return self.freq < other.freq
+def GenerateHuffmanTable(data: np.ndarray):
+    freq_counter = defaultdict(int)
+    
+    for value in data:
+        category, _ = EncodeValue(value)
+        freq_counter[category] += 1
+    
+    huffman_tree = BuildHuffmanTree(freq_counter)
+    huff_table = GenerateHuffmanCodes(huffman_tree)
 
-        def __le__(self, other):
-            return self.freq < other.freq or self.freq == other.freq
+    return huff_table
 
-        def __gt__(self, other):
-            return not (self <= other)
+def HuffmanEncode(data, huff_table):
+    encoded_data = ""
+    for value in data:
+        category, bit_string = EncodeValue(value)
+        encoded_data += huff_table[category] + bit_string
+    return encoded_data
 
-        def __ge__(self, other):
-            return not (self < other)
+def EncodeDCAC(dc_matrix, ac_matrix):
+    dc_data = dc_matrix.flatten()
+    ac_data = ac_matrix.flatten()
+    
+    dc_huff_table = GenerateHuffmanTable(dc_data)
+    ac_huff_table = GenerateHuffmanTable(ac_data)
 
-    def __init__(self, arr):
-        q = PriorityQueue()
+    encoded_dc = HuffmanEncode(dc_data, dc_huff_table)
+    encoded_ac = HuffmanEncode(ac_data, ac_huff_table)
 
-        # calculate frequencies and insert them into a priority queue
-        for val, freq in self.__calc_freq(arr).items():
-            q.put(self.__Node.init_leaf(val, freq))
-
-        while q.qsize() >= 2:
-            u = q.get()
-            v = q.get()
-
-            q.put(self.__Node.init_node(u, v))
-
-        self.__root = q.get()
-
-        # dictionaries to store huffman table
-        self.__value_to_bitstring = dict()
-
-    def value_to_bitstring_table(self):
-        if len(self.__value_to_bitstring.keys()) == 0:
-            self.__create_huffman_table()
-        return self.__value_to_bitstring
-
-    def __create_huffman_table(self):
-        def tree_traverse(current_node, bitstring=''):
-            if current_node is None:
-                return
-            if current_node.is_leaf():
-                self.__value_to_bitstring[current_node.value] = bitstring
-                return
-            tree_traverse(current_node.left_child, bitstring + '0')
-            tree_traverse(current_node.right_child, bitstring + '1')
-
-        tree_traverse(self.__root)
-
-    def __calc_freq(self, arr):
-        freq_dict = dict()
-        for elem in arr:
-            if elem in freq_dict:
-                freq_dict[elem] += 1
-            else:
-                freq_dict[elem] = 1
-        return freq_dict
+    return encoded_dc, encoded_ac, dc_huff_table, ac_huff_table
