@@ -1,9 +1,9 @@
-import os
+from PIL import Image
 import numpy as np
-from collections import defaultdict
+import os
 import cv2
-import filesaver
-import huffman
+from . import filesaver
+from .huffman import Huffman, HuffmanTable
 
 LUMINANCE_QUANTIZATION_TABLE = np.array([
     [16, 11, 10, 16, 24, 40, 51, 61],
@@ -41,9 +41,9 @@ def Padding(img: np.ndarray) -> np.ndarray:
 
 def TransformRgbToYCbCr(rgbImg: np.ndarray) -> np.ndarray:
     transform_matrix = np.array([
-        [ 0.299,  0.587,  0.114],
-        [-0.1687, -0.3313,  0.5],
-        [ 0.5, -0.4187, -0.0813]])
+        [    0.299,     0.587,     0.114],
+        [-0.168736, -0.331264,       0.5],
+        [      0.5, -0.418688, -0.081312]])
     
     offset = np.array([0, 128, 128])
     ycbcrImg = rgbImg @ transform_matrix.T + offset
@@ -94,7 +94,8 @@ def ZigZag(block: np.ndarray) -> np.ndarray:
 
     return np.array(zigzag)
 
-def CompressionImg(img, addr = ".jpg") -> np.ndarray:
+def CompressionImg(imgAddr, outputAddr = ".jpg") -> np.ndarray:
+    img = Image.open(imgAddr)
     imgMatrix = np.array(img)
     padImg = Padding(imgMatrix)
     ycbcrImg = TransformRgbToYCbCr(padImg)
@@ -107,7 +108,9 @@ def CompressionImg(img, addr = ".jpg") -> np.ndarray:
         raise ValueError("Image dimensions should be divisible by 8")
     
     dcMatrix = np.zeros((blocksCount, 3), dtype=np.int32)
-    acMatrix = np.zeros((blocksCount, 63, 3), dtype=np.int32)
+    acMatrix = np.zeros((blocksCount, 3, 63), dtype=np.int32)
+
+    previousDC = np.zeros(3, dtype=np.int32)
     
     for i in range(0, rows, 8):
         for j in range(0, cols, 8):
@@ -123,9 +126,14 @@ def CompressionImg(img, addr = ".jpg") -> np.ndarray:
                 quantMatrix = Quantize(dctMatrix, "luminance" if k == 0 else "chrominance")
                 zigzagMatrix = ZigZag(quantMatrix)
 
-                dcMatrix[blockIndex, k] = zigzagMatrix[0]
-                acMatrix[blockIndex, :, k] = zigzagMatrix[1:]
+                dcDifference = zigzagMatrix[0] - previousDC[k]
+                dcMatrix[blockIndex, k] = dcDifference
+                previousDC[k] = zigzagMatrix[0]
+                acMatrix[blockIndex, k, :] = zigzagMatrix[1:]
 
-    encoded_dc, encoded_ac, dc_huff_table, ac_huff_table = huffman.EncodeDCAC(dcMatrix, acMatrix)
+    huffman = Huffman(dcMatrix, acMatrix)
+    bitStream, tables = huffman.EncodeDCAC(useDefault=True)
 
-    filesaver.WriteJpeg(encoded_dc, encoded_ac, dc_huff_table, ac_huff_table, LUMINANCE_QUANTIZATION_TABLE, CHROMINANCE_QUANTIZATION_TABLE, rows, cols, addr)
+    filesaver.WriteJpeg(bitStream, tables, LUMINANCE_QUANTIZATION_TABLE, CHROMINANCE_QUANTIZATION_TABLE, rows, cols, outputAddr)
+
+    return os.stat(imgAddr).st_size / 1024, os.stat(outputAddr).st_size / 1024
