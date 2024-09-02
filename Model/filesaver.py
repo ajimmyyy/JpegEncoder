@@ -1,37 +1,65 @@
+from bitarray import bitarray
 import numpy as np
+from collections import Counter, OrderedDict
+from .huffman import HuffmanTable
 
+def WriteAPP0(f):
+    f.write(b'\xff\xe0')  
 
-def WriteHuffmanTable(f, huff_table, table_class, destination_id):
-    f.write(b'\xFF\xC4')
-
-    length = 3 + sum(len(huff_table[symbol]) for symbol in huff_table)
+    length = 16
     f.write(length.to_bytes(2, 'big'))
 
+    f.write(b'JFIF\x00')
+    f.write(b'\x01\x01')
+    f.write(b'\x00')
+    f.write(b'\x00\x01\x00\x01')
+    f.write(b'\x00\x00')
+
+def WriteHuffmanTable(f, huff_table: OrderedDict, table_class, destination_id):
+    f.write(b'\xFF\xC4')
+    
+    length = 3 + len(huff_table) + 16
+    f.write(length.to_bytes(2, 'big'))
+    
     table_info = (table_class << 4) | destination_id
     f.write(bytes([table_info]))
 
-    symbol_counts = [0] * 16
-    for code in huff_table.values():
-        symbol_counts[len(code) - 1] += 1
+    f.write(CalHTBitLength(huff_table))
     
-    f.write(bytes(symbol_counts))
+    for key, _ in huff_table.items(): 
+        f.write(key.to_bytes(1, 'big'))
 
-    sorted_symbols = sorted(huff_table.keys(), key=lambda k: len(huff_table[k]))
-    for symbol in sorted_symbols:
-        f.write(bytes([symbol]))
-
-    for symbol in sorted_symbols:
-        code_length = len(huff_table[symbol])
-        code_value = int(huff_table[symbol], 2)
-        f.write(code_value.to_bytes((code_length + 7) // 8, 'big'))
-
-def WriteQuantizationTable(f, quant_table, table_id):
+def WriteQuantizationTable(f, quant_table: np.ndarray, table_id):
     f.write(b'\xFF\xDB')
+
     f.write((67).to_bytes(2, 'big'))
-    
     f.write((0 << 4 | table_id).to_bytes(1, 'big'))
-    
-    f.write(quant_table.tobytes())
+
+    direction = 1
+    rows, cols = quant_table.shape
+    row, col = 0, 0
+    for _ in range(quant_table.size):
+        f.write(int(quant_table[row, col]).to_bytes(1, 'big'))
+        if direction == 1:
+            if col == cols - 1:
+                row += 1
+                direction = -1
+            elif row == 0:
+                col += 1
+                direction = -1
+            else:
+                row -= 1
+                col += 1
+        else:
+            if row == rows - 1:
+                col += 1
+                direction = 1
+            elif col == 0:
+                row += 1
+                direction = 1
+            else:
+                row += 1
+                col -= 1
 
 def WriteStartOfFrame(f, image_width, image_height, num_components):
     f.write(b'\xFF\xC0')
@@ -46,10 +74,11 @@ def WriteStartOfFrame(f, image_width, image_height, num_components):
         f.write((i).to_bytes(1, 'big'))
         if i == 1:
             f.write((0x11).to_bytes(1, 'big'))
+            f.write((0).to_bytes(1, 'big'))
         else:
             f.write((0x11).to_bytes(1, 'big'))
-        f.write((0).to_bytes(1, 'big'))
-
+            f.write((1).to_bytes(1, 'big'))
+        
 def WriteStartOfScan(f, num_components):
     f.write(b'\xFF\xDA')
     f.write((6 + 2 * num_components).to_bytes(2, 'big'))
@@ -123,22 +152,39 @@ def EncodeBlock(dc_value, ac_values, dc_huff_table, ac_huff_table):
     
     return encoded_block
 
-def WriteJpeg(encoded_dc, encoded_ac, dc_huff_table, ac_huff_table, quant_table_luminance, quant_table_chrominance, image_width, image_height, addr):
+def CalHTBitLength(huff_table: OrderedDict):
+    length_counts = [0] * 16
+    for _ , code in huff_table.items():
+        length = len(code)
+
+        if length <= 16:
+            length_counts[length - 1] += 1
+            
+    record = bytearray(length_counts)
+    bit_array = bitarray()
+    bit_array.frombytes(record)
+    
+    return bit_array
+
+def WriteJpeg(bitStream: bitarray, tables:HuffmanTable, quant_table_luminance, quant_table_chrominance, image_width, image_height, addr):
     with open(addr, 'wb') as f:
         f.write(b'\xff\xd8')
+
+        # Check X,Y pixel density
+        WriteAPP0(f)
         
         WriteQuantizationTable(f, quant_table_luminance, 0)
         WriteQuantizationTable(f, quant_table_chrominance, 1)
 
         WriteStartOfFrame(f, image_width, image_height, 3)
 
-        WriteHuffmanTable(f, dc_huff_table, 0, 0)  # DC Huffman table for Y
-        WriteHuffmanTable(f, ac_huff_table, 1, 0)  # AC Huffman table for Y
-        WriteHuffmanTable(f, dc_huff_table, 0, 1)  # DC Huffman table for Cb/Cr
-        WriteHuffmanTable(f, ac_huff_table, 1, 1)  # AC Huffman table for Cb/Cr
+        WriteHuffmanTable(f, tables.dcLuminanceCodes, 0, 0)  # DC Huffman table for Y
+        WriteHuffmanTable(f, tables.acLuminanceCodes, 1, 0)  # AC Huffman table for Y
+        WriteHuffmanTable(f, tables.dcChrominanceCodes, 0, 1)  # DC Huffman table for Cb/Cr
+        WriteHuffmanTable(f, tables.acChrominanceCodes, 1, 1)  # AC Huffman table for Cb/Cr
         
         WriteStartOfScan(f, 3)
 
-        WriteCompressedData(f, encoded_dc, encoded_ac)
+        f.write(bitStream.tobytes())
 
         f.write(b'\xff\xd9')
