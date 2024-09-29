@@ -17,7 +17,3 @@ python
 1. 開啟main.py
 2. 指定圖檔位置與輸出位置
 3. start
-
-## TODO
-
-- 修正檔案寫入

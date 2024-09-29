@@ -166,7 +166,7 @@ def CalHTBitLength(huff_table: OrderedDict):
     
     return bit_array
 
-def WriteJpeg(bitStream: bitarray, tables:HuffmanTable, quant_table_luminance, quant_table_chrominance, image_width, image_height, addr):
+def WriteJpeg(bitStream: bitarray, tables:HuffmanTable, quant_table_luminance, quant_table_chrominance, image_height, image_width, addr):
     with open(addr, 'wb') as f:
         f.write(b'\xff\xd8')
 
