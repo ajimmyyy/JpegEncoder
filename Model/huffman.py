@@ -471,10 +471,15 @@ class Huffman:
         return freq_dict
 
     def __EncodeDC(self, bitStream: bitarray, dcVal, codes):
+        if dcVal == 0:
+            huffman_code = codes.get(0, '')
+            bitStream.extend(bitarray(huffman_code))
+            return
+        
         bit_length = int(dcVal).bit_length()
         huffman_code = codes.get(bit_length, '')
 
-        if(dcVal<=0):
+        if(dcVal<0):
             codeList = list(bin(dcVal)[3:])
             for i in range(len(codeList)):
                 if (codeList[i] == '0'):
@@ -494,8 +499,9 @@ class Huffman:
             
     def __EncodeAC(self, bitStream: bitarray, acList, codes):
         run_length = 0
+        last_non_zero_index = np.where(acList == 1)[0][-1] if 1 in acList else 0
 
-        for i in range(0, len(acList)):
+        for i in range(0,  last_non_zero_index + 1):
             val = acList[i]
             
             if val == 0:
@@ -528,8 +534,12 @@ class Huffman:
 
                 run_length = 0
 
-        if run_length > 0:
+        if last_non_zero_index < len(acList) - 1:
             bitStream.extend(codes[0])        
+
+    def __padding(self, bitStream: bitarray, padding_char='1'):
+        padding_size = 8 - (len(bitStream) % 8)
+        bitStream.extend(padding_char * padding_size)
 
     def CalDCACCode(self, useDefault): 
         if useDefault:
@@ -546,7 +556,7 @@ class Huffman:
     def EncodeDCAC(self, useDefault):
         bitStream = bitarray()
         tables = self.CalDCACCode(useDefault)
-
+        
         for i in range(self.dcMatrix.shape[0]):
             # luminance
             self.__EncodeDC(bitStream, self.dcMatrix[i, 0], tables.dcLuminanceCodes)
@@ -557,8 +567,9 @@ class Huffman:
             self.__EncodeAC(bitStream, self.acMatrix[i, 1, :], tables.acChrominanceCodes)
             self.__EncodeDC(bitStream, self.dcMatrix[i, 2], tables.dcChrominanceCodes)
             self.__EncodeAC(bitStream, self.acMatrix[i, 2, :], tables.acChrominanceCodes)
-
+            
         # handle FF00
+        self.__padding(bitStream)
         byteStream = bitStream.tobytes()
 
         i = 0
